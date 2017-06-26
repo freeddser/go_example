@@ -1,0 +1,97 @@
+package main
+
+import (
+    "golang.org/x/crypto/ssh"
+        "log"
+        "bytes"
+        "fmt"
+        "os"
+        "bufio"
+        "strings"
+        "io/ioutil"
+)
+
+func sshClient(know_hosts,host,port,ssh_user,private_key,cmdstr string)  string{
+        file, err := os.Open(know_hosts)
+        if err != nil {
+                log.Fatal(err)
+        }
+        defer file.Close()
+        //fmt.Println(know_hosts)
+        //fmt.Println(file)
+        scanner := bufio.NewScanner(file)
+        var hostKey ssh.PublicKey
+        for scanner.Scan() {
+                fields := strings.Split(scanner.Text(), " ")
+                if len(fields) != 3 {
+                        continue
+                }
+                if strings.Contains(fields[0], host) {
+                        var err error
+                        hostKey, _, _, _, err = ssh.ParseAuthorizedKey(scanner.Bytes())
+                        if err != nil {
+                                log.Fatalf("error parsing %q: %v", fields[2], err)
+                        }
+                        break
+                }
+        }
+        //fmt.Println(hostKey)
+        if hostKey == nil {
+                log.Fatalf("no hostkey for %s", host)
+        }
+        // An SSH client is represented with a ClientConn.
+        //
+        // To authenticate with the remote server you must pass at least one
+        // implementation of AuthMethod via the Auth field in ClientConfig,
+        // and provide a HostKeyCallback.
+
+        key, err := ioutil.ReadFile(private_key)
+        if err != nil {
+                log.Fatalf("unable to read private key: %v", err)
+        }
+
+        // Create the Signer for this private key.
+        signer, err := ssh.ParsePrivateKey(key)
+        if err != nil {
+                log.Fatalf("unable to parse private key: %v", err)
+        }
+
+        config := &ssh.ClientConfig{
+                User: ssh_user,
+                Auth: []ssh.AuthMethod{
+                        // Use the PublicKeys method for remote authentication.
+                        ssh.PublicKeys(signer),
+                },
+                HostKeyCallback: ssh.FixedHostKey(hostKey),
+        }
+
+
+        client, err := ssh.Dial("tcp", host+":"+port, config)
+        if err != nil {
+                log.Fatal("Failed to dial: ", err)
+        }
+
+        // Each ClientConn can support multiple interactive sessions,
+        // represented by a Session.
+        session, err := client.NewSession()
+        if err != nil {
+                log.Fatal("Failed to create session: ", err)
+        }
+        defer session.Close()
+
+        // Once a Session is created, you can execute a single command on
+        // the remote side using the Run method.
+        var b bytes.Buffer
+        session.Stdout = &b
+        if err := session.Run(cmdstr); err != nil {
+                log.Fatal("Failed to run: " + err.Error())
+        }
+        //fmt.Println("["+host+"]----->"+b.String())
+        return "["+host+"]----->"+b.String()
+}
+
+
+func main() {
+        abc:=sshClient("/home/user/.ssh/known_hosts","192.168.1.2","22","user","/home/user/.ssh/user","uptime")
+        fmt.Println(abc)
+}
